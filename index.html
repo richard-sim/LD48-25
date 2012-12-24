@@ -1,0 +1,978 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>LD48 - 25</title>
+</head>
+
+<body onresize="onResizeWindow()">
+<section>
+<div><canvas id="game" width="640" height="480">
+Your browser does not support HTML5 Canvas, which is required to play this game. Please try the latest version of Chrome or FireFox.
+</canvas></div>
+<audio id="track01" loop preload="auto">
+<source src="assets/audio/track01.ogg" type="audio/ogg">
+<source src="assets/audio/track01.mp3" type="audio/mp3">
+Your browser does not support HTML5 Audio, which is required to play this game. Please try the latest version of Chrome or FireFox.
+</audio>
+<audio id="jump01" preload="auto">
+<source src="assets/audio/jump01.wav" type="audio/wav">
+<source src="assets/audio/jump01.ogg" type="audio/ogg">
+</audio>
+<audio id="jump02" preload="auto">
+<source src="assets/audio/jump02.wav" type="audio/wav">
+<source src="assets/audio/jump02.ogg" type="audio/ogg">
+</audio>
+<audio id="jump03" preload="auto">
+<source src="assets/audio/jump03.wav" type="audio/wav">
+<source src="assets/audio/jump03.ogg" type="audio/ogg">
+</audio>
+<audio id="pickup01" preload="auto">
+<source src="assets/audio/pickup01.wav" type="audio/wav">
+<source src="assets/audio/pickup01.ogg" type="audio/ogg">
+</audio>
+<audio id="pickup02" preload="auto">
+<source src="assets/audio/pickup02.wav" type="audio/wav">
+<source src="assets/audio/pickup02.ogg" type="audio/ogg">
+</audio>
+<audio id="hurt01" preload="auto">
+<source src="assets/audio/hurt01.wav" type="audio/wav">
+<source src="assets/audio/hurt01.ogg" type="audio/ogg">
+</audio>
+<audio id="hurt02" preload="auto">
+<source src="assets/audio/hurt02.wav" type="audio/wav">
+<source src="assets/audio/hurt02.ogg" type="audio/ogg">
+</audio>
+<audio id="death01" preload="auto">
+<source src="assets/audio/death01.wav" type="audio/wav">
+<source src="assets/audio/death01.ogg" type="audio/ogg">
+</audio>
+<audio id="explode01" preload="auto">
+<source src="assets/audio/explode01.wav" type="audio/wav">
+<source src="assets/audio/explode01.ogg" type="audio/ogg">
+</audio>
+
+<script type="text/javascript">
+var canvas;
+var ctx;
+
+var isLoadComplete = false;
+var prevIsLoadComplete = false;
+
+var isGameOver = false;
+var isGameWon = false;
+var isPaused = false;
+var isMuted = false;
+
+var dx = 1;
+var dy = 24;
+var gCameraPosition;
+var gLastUpdateTime = 0;
+var gInitTime = 0;
+var gStartTime = 0;
+var gCurrTime = 0;
+var gTimeDelta = 0;
+
+var DIR_LEFT = -1;
+var DIR_RIGHT = 1;
+
+var indexer = 0;
+
+indexer = 0;
+var BRAIN_PLAYER = indexer++;
+var BRAIN_ENEMY = indexer++;
+var BRAIN_ARK = indexer++;
+
+indexer = 0;
+var KEY_UP = indexer++;
+var KEY_DOWN = indexer++;
+var KEY_LEFT = indexer++;
+var KEY_RIGHT = indexer++;
+var KEY_SPACE = indexer++;
+var KEY_PAUSE = indexer++;
+var KEY_MUTE = indexer++;
+var keys = new Array(indexer);
+var prevKeys = new Array(indexer);
+
+indexer = 0;
+var IMG_PLAYER = indexer++;
+var IMG_ENEMY = indexer++;
+var IMG_ARK = indexer++;
+var IMG_BG_GREEN = indexer++;
+var IMG_BG_WATER = indexer++;
+var imageList = new Array(indexer);
+
+indexer = 0;
+var AUD_TRACK = indexer++;
+var AUD_JUMP01 = indexer++;
+var AUD_JUMP02 = indexer++;
+var AUD_JUMP03 = indexer++;
+var AUD_PICKUP01 = indexer++;
+var AUD_PICKUP02 = indexer++;
+var AUD_HURT01 = indexer++;
+var AUD_HURT02 = indexer++;
+var AUD_DEATH01 = indexer++;
+var AUD_EXPLODE01 = indexer++;
+var audioList = new Array(indexer);
+
+var entityList = new Array();
+var groundList = new Array();
+var waterList = new Array();
+
+
+function Point2D(x, y)
+{
+	this.x = x;
+	this.y = y;
+	
+	this.magnitude = Point2DMagnitude;
+	this.add = Point2DAdd;
+	this.subtract = Point2DSubtract;
+	this.multiply = Point2DMultiply;
+}
+
+function Point2DMagnitude()
+{
+	if ((this.x == 0) && (this.y == 0))
+		return 0.0;
+	return Math.sqrt(this.x*this.x + this.y*this.y);
+}
+function Point2DAdd(other)
+{
+	this.x += other.x;
+	this.y += other.y;
+}
+function Point2DSubtract(other)
+{
+	this.x -= other.x;
+	this.y -= other.y;
+}
+function Point2DMultiply(other)
+{
+	this.x *= other.x;
+	this.y *= other.y;
+}
+
+function CurveSegment(start, control, end)
+{
+	this.start = start;
+	this.control = control;
+	this.end = end;
+}
+
+function GameEntity(img, size, x, y, direction, brain, life, attack)
+{
+	this.image = img;
+	this.size = size;
+	
+	this.position = new Point2D(x, y);
+	this.velocity = new Point2D(0, 0);
+	this.direction = direction;
+	
+	this.life = life;
+	this.attack = attack;
+	this.invulnerableTimeRemaining = 0;
+	
+	this.isPlayer = (brain == BRAIN_PLAYER);
+	if (brain == BRAIN_PLAYER)
+		this.runAI = PlayerBrain;
+	else if (brain == BRAIN_ENEMY)
+		this.runAI = EnemyBrain;
+	else if (brain == BRAIN_ARK)
+		this.runAI = ArkBrain;
+}
+
+function GenericBrain(entity)
+{
+	if (entity.invulnerableTimeRemaining > 0)
+	{
+		entity.invulnerableTimeRemaining -= gTimeDelta;
+		if (entity.invulnerableTimeRemaining < 0)
+			entity.invulnerableTimeRemaining = 0;
+	}
+
+	var ext = new Point2D(entity.position.x + ((entity.size / 2.0) * entity.direction), entity.position.y);
+	var extHeight = GroundHeightAt(ext);
+	if (entity.position.y < extHeight)
+	{
+		if ((entity.velocity.x * entity.direction) > 0)
+		{
+			entity.velocity.x = 0.0;
+			
+			if (!entity.isPlayer)
+				entity.direction *= -1.0;
+		}
+	}
+	
+	entity.position.add(entity.velocity);
+
+	var groundHeight = GroundHeightAt(entity.position);
+	if (entity.position.y < (groundHeight + entity.size / 2.0))
+	{
+		entity.velocity.y = 0.0;
+		entity.position.y = groundHeight + (entity.size / 2.0);
+	}
+
+	var waterHeight = WaterHeightAt(entity.position);
+	if ((waterHeight > groundHeight) && (entity.position.y < waterHeight))
+	{
+		if (entity.life > 0)
+		{
+			if (entity.invulnerableTimeRemaining <= 0)
+			{
+				if (entity.isPlayer)
+				{
+					entity.life -= 25;
+					entity.invulnerableTimeRemaining = 500;
+					
+					if (entity.life > 0)
+					{
+						var hurtSound = AUD_HURT01 + Math.floor(Math.random() * 2.0);
+						audioList[hurtSound][1].play();
+					}
+					else
+					{
+						isGameOver = true;
+						audioList[AUD_DEATH01][1].play();
+					}
+				}
+				else
+				{
+					// Long enough to get out of the water?
+					entity.invulnerableTimeRemaining = 500;
+					
+					if ((entity.velocity.x * entity.direction) > 0)
+					{
+						entity.direction *= -1.0;
+					}
+				}
+			}
+		}
+	}
+	
+	entity.velocity.multiply(new Point2D(0.9, 0.9));
+	entity.velocity.add(new Point2D(0, -0.98));
+}
+
+function PlayerBrain()
+{
+	if (keys[KEY_LEFT])
+	{
+		this.velocity.x -= dx;
+		this.direction = DIR_LEFT;
+	}
+	if (keys[KEY_RIGHT])
+	{
+		this.velocity.x += dx;
+		this.direction = DIR_RIGHT;
+	}
+
+	if (keys[KEY_SPACE] && !prevKeys[KEY_SPACE])
+	{
+		var groundHeight = GroundHeightAt(this.position);
+		if (this.position.y < (groundHeight + (this.size * 0.75)))
+		{
+			var jumpSound = AUD_JUMP01 + Math.floor(Math.random() * 2.0);
+			audioList[jumpSound][1].play();
+			
+			if (this.velocity.y >= 0)
+				this.velocity.y += dy;
+			else
+				this.velocity.y = dy;
+		}
+	}
+	
+	GenericBrain(this);
+
+	// Check for damage/death after the generic brain is run, as that will fix up the height for the ground (very steep slopes will be an issue otherwise)
+	for (var i=0; i<entityList.length; i++)
+	{
+		var otherEntity = entityList[i];
+		if (!otherEntity.isPlayer && (otherEntity.life > 0))
+		{
+			var diff = new Point2D(this.position.x, this.position.y);
+			diff.subtract(otherEntity.position);
+			var dist = diff.magnitude();
+			
+			var radiiSum = (this.size/2.0) + (otherEntity.size/2.0);
+			if (dist < radiiSum)
+			{
+				if ((this.position.y - (this.size / 2.0)) > otherEntity.position.y)
+				{
+					otherEntity.life -= this.attack;
+					this.velocity.y = 8.0;
+					
+					if (otherEntity.life <= 0)
+					{
+						var pickupSound = AUD_PICKUP01 + Math.floor(Math.random() * 2.0);
+						audioList[pickupSound][1].play();
+						audioList[AUD_JUMP03][1].play();
+					}
+				}
+				else
+				{
+					if (this.invulnerableTimeRemaining <= 0)
+					{
+						this.life -= otherEntity.attack;
+						this.invulnerableTimeRemaining = 2000;
+						
+						var t = 1.0 - (dist / radiiSum);
+						diff.multiply(new Point2D(t, t));
+						this.velocity = diff;
+						this.velocity.y += 12.0;
+						
+						if (this.life > 0)
+						{
+							var hurtSound = AUD_HURT01 + Math.floor(Math.random() * 2.0);
+							audioList[hurtSound][1].play();
+						}
+						else
+						{
+							isGameOver = true;
+							audioList[AUD_DEATH01][1].play();
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+function EnemyBrain()
+{
+	if (this.life > 0)
+	{
+		if (Math.floor(Math.random() * 1000.0) < 4)
+			this.direction *= -1;
+		this.velocity.x += this.direction * (dx / 8.0);
+	}
+	
+	GenericBrain(this);
+}
+
+function ArkBrain()
+{
+	// Do nothing
+	if (!isGameWon && (this.life <= 0))
+	{
+		isGameWon = true;
+		audioList[AUD_EXPLODE01][1].play();
+	}
+}
+
+function GameToCanvas(pt)
+{
+	var cameraSpace = new Point2D(pt.x, pt.y);
+	cameraSpace.subtract(gCameraPosition);
+	var halfCanvas = new Point2D(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2));
+	cameraSpace.add(halfCanvas);
+	var canvasSpace = new Point2D(cameraSpace.x, canvas.height - cameraSpace.y);
+	return canvasSpace;
+}
+
+function GetQuadraticCurvePoint(seg, t)
+{
+    var invT = 1.0 - t;
+	
+	var p0 = seg.start;
+	var p1 = seg.control;
+	var p2 = seg.end;
+	
+    return new Point2D((invT * invT * p0.x) + (2.0 * invT * t * p1.x) + (t * t * p2.x),
+					   (invT * invT * p0.y) + (2.0 * invT * t * p1.y) + (t * t * p2.y));
+}
+
+function WaterHeightAt(pt)
+{
+	return CurveHeightAt(waterList, pt);
+}
+
+function GroundHeightAt(pt)
+{
+	return CurveHeightAt(groundList, pt);
+}
+
+function CurveHeightAt(curveList, pt)
+{
+	for (var i=0; i<curveList.length; i++)
+	{
+		var seg = curveList[i];
+		if ((pt.x >= seg.start.x) && (pt.x <= seg.end.x))
+		{
+			var t = (pt.x - seg.start.x) / (seg.end.x - seg.start.x);
+
+			var incr = 0.25;
+			do
+			{
+				var pos = GetQuadraticCurvePoint(seg, t);
+				
+				if (pos.x > pt.x)
+					incr = -Math.abs(incr);
+				else
+					incr = Math.abs(incr);
+				incr *= 0.5;
+				
+				t += incr;
+				if (t > 1.0)
+					t = 1.0;
+				else if (t < 0.0)
+					t = 0.0;
+			} while (Math.abs(pos.x - pt.x) > 1.0);
+
+			return pos.y;
+		}
+	}
+	
+	return 0;
+}
+
+function DrawEntity(entity)
+{
+	ctx.save();
+	
+	var pos = GameToCanvas(entity.position);
+	
+	var img = imageList[entity.image][1];
+	var imgW = entity.size;
+	var imgH = entity.size;
+	var squish = (!entity.isPlayer && (entity.life <= 0)) ? 1.0 : 0.0;
+
+	ctx.translate(pos.x, pos.y);
+	ctx.scale(entity.direction, 1);
+	ctx.drawImage(img, -imgW/2, -imgH/2 + (squish * imgH*0.75), imgW, imgH - (squish * imgH*0.75));
+	ctx.translate(-pos.x, -pos.y);
+	
+	if (entity.isPlayer && (entity.life > 0) && (entity.invulnerableTimeRemaining > 0))
+	{
+		ctx.strokeStyle = "white";
+		ctx.lineWidth = 4;
+		
+		ctx.beginPath();
+		ctx.arc(pos.x, pos.y, entity.size / 2 + 8, 0, Math.PI * 2.0, true);
+		ctx.stroke();
+	}
+	
+	ctx.restore();
+}
+
+function DrawLevel()
+{
+	if ((groundList.length == 0) && (waterList.length == 0))
+		return;
+		
+	ctx.save();
+	
+	ctx.lineWidth = 10;
+	
+	if (waterList.length > 0)
+	{
+		ctx.strokeStyle = "#1F9BFB";
+		
+		var img = imageList[IMG_BG_WATER][1];
+		var pattern = ctx.createPattern(img, "repeat");
+		ctx.fillStyle = pattern;
+		
+		var firstCurve = waterList[0];
+		var lastCurve = waterList[waterList.length - 1];
+		
+		var firstPos = GameToCanvas(firstCurve.start);
+		var lastPos = GameToCanvas(lastCurve.end);
+		var groundPos = GameToCanvas(new Point2D(0, 0));
+		
+		ctx.beginPath();
+		ctx.moveTo(firstPos.x, firstPos.y);
+		for (var i=0; i<waterList.length; i++)
+		{
+			var curve = waterList[i];
+			var control = GameToCanvas(curve.control);
+			var end = GameToCanvas(curve.end);
+			ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
+		}
+		ctx.stroke();
+		
+		var scroll = (gCurrTime - gStartTime) / 5;
+		var yoffset = 128;
+		
+		ctx.lineTo(lastPos.x, groundPos.y);
+		ctx.lineTo(firstPos.x, groundPos.y);
+		ctx.lineTo(firstPos.x, firstPos.y);
+		ctx.translate(firstPos.x - scroll, (firstPos.y + yoffset));
+		ctx.fill();
+		ctx.translate(-(firstPos.x - scroll), -(firstPos.y + yoffset));
+	}
+	
+	if (groundList.length > 0)
+	{
+		ctx.strokeStyle = "#65962C";
+		
+		var img = imageList[IMG_BG_GREEN][1];
+		var pattern = ctx.createPattern(img, "repeat");
+		ctx.fillStyle = pattern;
+		
+		var firstCurve = groundList[0];
+		var lastCurve = groundList[groundList.length - 1];
+		
+		var firstPos = GameToCanvas(firstCurve.start);
+		var lastPos = GameToCanvas(lastCurve.end);
+		var groundPos = GameToCanvas(new Point2D(0, 0));
+		
+		ctx.beginPath();
+		ctx.moveTo(firstPos.x, firstPos.y);
+		for (var i=0; i<groundList.length; i++)
+		{
+			var curve = groundList[i];
+			var control = GameToCanvas(curve.control);
+			var end = GameToCanvas(curve.end);
+			ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
+		}
+		ctx.stroke();
+		
+		ctx.lineTo(lastPos.x, groundPos.y);
+		ctx.lineTo(firstPos.x, groundPos.y);
+		ctx.lineTo(firstPos.x, firstPos.y);
+		ctx.translate(firstPos.x, firstPos.y);
+		ctx.fill();
+		ctx.translate(-firstPos.x, -firstPos.y);
+	}
+	
+	ctx.restore();
+}
+
+function DrawEntities()
+{
+	for (var i=0; i<entityList.length; i++)
+		DrawEntity(entityList[i]);
+}
+
+function Clear()
+{
+	ctx.save();
+	
+	ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+	ctx.fillStyle = "#9AE4FF";
+	ctx.strokeStyle = "black";
+	ctx.lineWidth = 1;
+	
+	ctx.beginPath();
+	ctx.rect(0, 0, canvas.width, canvas.height);
+	ctx.fill();
+	ctx.stroke();
+	
+	ctx.restore();
+}
+
+function ImagesLoaded()
+{
+	for (var i=0; i<imageList.length; i++)
+	{
+		if (!imageList[i][0])
+			return false;
+	}
+	
+	return true;
+}
+
+function AudioLoaded()
+{
+	// Only wait for 30s for audio to load, as many browsers currently have issues with preloading audio
+	var currTime = Date.now();
+	if ((currTime - gInitTime) > 30000)
+		return true;
+
+	for (var i=0; i<audioList.length; i++)
+	{
+		if (!audioList[i][0])
+			return false;
+	}
+	
+	return true;
+}
+
+function IsGameLoadComplete()
+{
+	return ImagesLoaded() && AudioLoaded();
+}
+
+function onLoadComplete()
+{
+	gStartTime = Date.now();
+	
+	for (var i=0; i<audioList.length; i++)
+	{
+		audioList[i][1].pause();
+		//audioList[i][1].currentTime = 0.0;
+		audioList[i][1].muted = false;
+	}
+	
+	audioList[AUD_TRACK][1].volume = 0.667;
+	audioList[AUD_JUMP01][1].volume = 1.0;
+	audioList[AUD_JUMP02][1].volume = 1.0;
+	audioList[AUD_JUMP03][1].volume = 0.25;
+	audioList[AUD_PICKUP01][1].volume = 0.25;
+	audioList[AUD_PICKUP02][1].volume = 0.25;
+	audioList[AUD_HURT01][1].volume = 0.5;
+	audioList[AUD_HURT02][1].volume = 0.5;
+	audioList[AUD_DEATH01][1].volume = 0.25;
+	audioList[AUD_EXPLODE01][1].volume = 1.0;
+
+	audioList[AUD_TRACK][1].play();
+}
+
+function Draw()
+{
+	Clear();
+	
+	prevIsLoadComplete = isLoadComplete;
+	isLoadComplete = IsGameLoadComplete();
+	
+	if (!isLoadComplete)
+	{
+		ctx.save();
+		
+		ctx.font = "bold 32px Arial";
+		ctx.textAlign = "center";
+
+		ctx.fillStyle = "#9659B3";
+		ctx.fillText("Loading...", canvas.width/2, canvas.height/2);
+		
+		ctx.strokeStyle = "black";
+		ctx.lineWidth = 1;
+		ctx.strokeText("Loading...", canvas.width/2, canvas.height/2);
+		
+		ctx.restore();
+		
+		return;
+	}
+	
+	if (isLoadComplete && !prevIsLoadComplete)
+	{
+		onLoadComplete();
+	}
+	
+	DrawLevel();
+	
+	DrawEntities();
+	
+	if (isGameWon)
+	{
+		ctx.save();
+		
+		ctx.font = "bold 64px Arial";
+		ctx.textAlign = "center";
+
+		ctx.fillStyle = "#2080FF";
+		ctx.fillText("Winner!", canvas.width/2, canvas.height/2);
+		
+		ctx.strokeStyle = "black";
+		ctx.lineWidth = 2;
+		ctx.strokeText("Winner!", canvas.width/2, canvas.height/2);
+		
+		ctx.restore();
+	}
+	else if (isGameOver)
+	{
+		ctx.save();
+		
+		ctx.font = "bold 64px Arial";
+		ctx.textAlign = "center";
+
+		ctx.fillStyle = "#800000";
+		ctx.fillText("Game Over", canvas.width/2, canvas.height/2);
+		
+		ctx.strokeStyle = "black";
+		ctx.lineWidth = 2;
+		ctx.strokeText("Game Over", canvas.width/2, canvas.height/2);
+		
+		ctx.restore();
+	}
+}
+
+function UpdateKeys()
+{
+	if (!keys[KEY_PAUSE] && prevKeys[KEY_PAUSE])
+		isPaused = !isPaused;
+	if (!keys[KEY_MUTE] && prevKeys[KEY_MUTE])
+	{
+		isMuted = !isMuted;
+		audioList[AUD_TRACK][1].muted = isMuted;
+	}
+}
+
+function Update()
+{
+	UpdateKeys();
+	
+	gCurrTime = Date.now();
+	gTimeDelta = gCurrTime - gLastUpdateTime;
+	
+	if (isPaused || isGameOver || isGameWon)
+	{
+		gLastUpdateTime = gCurrTime;
+		prevKeys = keys.slice();
+		return;
+	}
+	
+	for (var i=0; i<entityList.length; i++)
+	{
+		entityList[i].runAI();
+	}
+	
+	var halfW = Math.ceil(canvas.width / 2);
+	var cameraLeft = gCameraPosition.x - halfW;
+	var cameraRight = gCameraPosition.x + halfW;
+	var scaledVelocity = new Point2D(entityList[0].velocity.x, entityList[0].velocity.y);
+	scaledVelocity.multiply(new Point2D(48, 48));
+	var cameraPadding = 256;
+	if ((entityList[0].position.x + scaledVelocity.x) < (cameraLeft + cameraPadding))
+	{
+		var newLeft = (entityList[0].position.x + scaledVelocity.x) - cameraPadding;
+		gCameraPosition.x = newLeft + halfW;
+	}
+	else if ((entityList[0].position.x + scaledVelocity.x) > (cameraRight - cameraPadding))
+	{
+		var newRight = (entityList[0].position.x + scaledVelocity.x) + cameraPadding;
+		gCameraPosition.x = newRight - halfW;
+	}
+
+	gLastUpdateTime = gCurrTime;
+	prevKeys = keys.slice();
+}
+
+function processKeyEvent(keyCode, pressed)
+{
+	switch (keyCode)
+	{
+	case 87:
+	case 38:
+		keys[KEY_UP] = pressed;
+		break;
+	
+	case 83:
+	case 40:
+		keys[KEY_DOWN] = pressed;
+		break;
+	
+	case 65:
+	case 37:
+		keys[KEY_LEFT] = pressed;
+		break;
+	
+	case 68:
+	case 39:
+		keys[KEY_RIGHT] = pressed;
+		break;
+	
+	case 32:
+		keys[KEY_SPACE] = pressed;
+		break;
+	
+	case 80:
+		keys[KEY_PAUSE] = pressed;
+		break;
+	
+	case 77:
+		keys[KEY_MUTE] = pressed;
+		break;
+	}
+}
+
+function onKeyDown(evt)
+{
+	processKeyEvent(evt.keyCode, true);
+}
+
+function onKeyUp(evt)
+{
+	processKeyEvent(evt.keyCode, false);
+}
+
+function GameLoop()
+{
+	window.requestAnimFrame(GameLoop);
+
+	Update();
+	Draw();
+}
+
+function onResizeWindow()
+{
+	var desiredAspectRatio = 16.0/9.0;
+	var desiredW = window.innerWidth - 32;
+	var desiredH = window.innerHeight - 32;
+	
+	if ((desiredW / desiredAspectRatio) <= desiredH)
+		desiredH = desiredW / desiredAspectRatio;
+	else
+		desiredW = desiredH * desiredAspectRatio;
+	
+	if (canvas.width != desiredW)
+		canvas.width = desiredW;
+	if (canvas.height != desiredH)
+		canvas.height = desiredH;
+}
+
+function onImageLoaded(i)
+{
+	imageList[i][0] = true;
+}
+
+function LoadImage(i, src)
+{
+	if (!imageList[i][0])
+		imageList[i][1].src = src;
+}
+
+function onAudioLoaded(i)
+{
+	audioList[i][0] = true;
+	audioList[i][1].pause();
+	//audioList[i][1].currentTime = 0.0;
+	audioList[i][1].muted = false;
+}
+
+function AsyncLoadImages()
+{
+	for (var i=0; i<imageList.length; i++)
+	{
+		imageList[i] = new Array(2);
+		imageList[i][0] = false;
+		imageList[i][1] = new Image;
+
+		(function ()
+		{
+			var idx = i;
+			imageList[idx][1].onload = function()
+			{
+				onImageLoaded(idx);
+			}
+		}
+		());
+	}
+	
+	LoadImage(IMG_PLAYER, "assets/images/player.png");
+	LoadImage(IMG_ENEMY, "assets/images/enemy.png");
+	LoadImage(IMG_ARK, "assets/images/ark.png");
+	LoadImage(IMG_BG_GREEN, "assets/images/bg_green.png");
+	LoadImage(IMG_BG_WATER, "assets/images/bg_water.png");
+}
+
+function AsyncLoadAudio()
+{
+	for (var i=0; i<audioList.length; i++)
+	{
+		audioList[i] = new Array(2);
+		audioList[i][0] = false;
+	}
+
+	audioList[AUD_TRACK][1] = document.getElementById("track01");
+	audioList[AUD_JUMP01][1] = document.getElementById("jump01");
+	audioList[AUD_JUMP02][1] = document.getElementById("jump02");
+	audioList[AUD_JUMP03][1] = document.getElementById("jump03");
+	audioList[AUD_PICKUP01][1] = document.getElementById("pickup01");
+	audioList[AUD_PICKUP02][1] = document.getElementById("pickup02");
+	audioList[AUD_HURT01][1] = document.getElementById("hurt01");
+	audioList[AUD_HURT02][1] = document.getElementById("hurt02");
+	audioList[AUD_DEATH01][1] = document.getElementById("death01");
+	audioList[AUD_EXPLODE01][1] = document.getElementById("explode01");
+
+	for (var i=0; i<audioList.length; i++)
+	{
+		(function ()
+		{
+			var idx = i;
+
+			audioList[idx][1].addEventListener('canplaythrough', function() { onAudioLoaded(idx); }, false);
+			
+			audioList[idx][1].load();
+			audioList[idx][1].volume = 0.0;
+			audioList[idx][1].muted = true;
+			audioList[idx][1].play();
+		}
+		());
+	}
+}
+
+function init()
+{
+	canvas = document.getElementById("game");
+	ctx = canvas.getContext("2d");
+	onResizeWindow();
+		
+	var cx = canvas.width / 2;
+	var cy = canvas.height / 2;
+	
+	window.addEventListener('keydown', onKeyDown, true);
+	window.addEventListener('keyup', onKeyUp, true);
+	
+	for (var i=0; i<keys.length; i++)
+		keys[i] = false;
+	prevKeys = keys.slice();
+	
+	gCameraPosition = new Point2D(cx, cy);
+
+	var cnt = 0;
+	groundList[cnt++] = new CurveSegment(new Point2D(-900, 400), new Point2D(   0, 900), new Point2D(   0, 100));
+	groundList[cnt++] = new CurveSegment(new Point2D(   0, 100), new Point2D( 100, 150), new Point2D( 200, 100));
+	groundList[cnt++] = new CurveSegment(new Point2D( 200, 100), new Point2D( 400, 200), new Point2D( 600, 100));
+	groundList[cnt++] = new CurveSegment(new Point2D( 600, 100), new Point2D( 700, 150), new Point2D( 800, 100));
+	groundList[cnt++] = new CurveSegment(new Point2D( 800, 100), new Point2D( 900, 150), new Point2D(1000, 100));
+	groundList[cnt++] = new CurveSegment(new Point2D(1000, 100), new Point2D(1400, 450), new Point2D(1500, 100));
+	groundList[cnt++] = new CurveSegment(new Point2D(1500, 100), new Point2D(1600, 175), new Point2D(1700, 100));
+	groundList[cnt++] = new CurveSegment(new Point2D(1700, 100), new Point2D(1800, 125), new Point2D(1900, 100));
+	groundList[cnt++] = new CurveSegment(new Point2D(1900, 100), new Point2D(2000, 150), new Point2D(2100, 100));
+	groundList[cnt++] = new CurveSegment(new Point2D(2100, 100), new Point2D(2150, 250), new Point2D(2300, 250));
+	groundList[cnt++] = new CurveSegment(new Point2D(2300, 250), new Point2D(2500, 350), new Point2D(2800, 250));
+	groundList[cnt++] = new CurveSegment(new Point2D(2800, 250), new Point2D(2950, 300), new Point2D(3100, 100));
+	groundList[cnt++] = new CurveSegment(new Point2D(3100, 100), new Point2D(3200, 150), new Point2D(3300, 100));
+	groundList[cnt++] = new CurveSegment(new Point2D(3300, 100), new Point2D(3400, 450), new Point2D(3600, 150));
+	groundList[cnt++] = new CurveSegment(new Point2D(3600, 150), new Point2D(3800,  50), new Point2D(4000,   0));
+
+	cnt = 0;
+	waterList[cnt++] = new CurveSegment(new Point2D(3700, 100), new Point2D(3800,  50), new Point2D(3900, 100));
+	waterList[cnt++] = new CurveSegment(new Point2D(3900, 100), new Point2D(4000,  50), new Point2D(4100, 100));
+	waterList[cnt++] = new CurveSegment(new Point2D(4100, 100), new Point2D(4200,  50), new Point2D(4300, 100));
+	waterList[cnt++] = new CurveSegment(new Point2D(4300, 100), new Point2D(4400,  50), new Point2D(4500, 100));
+	waterList[cnt++] = new CurveSegment(new Point2D(4500, 100), new Point2D(4600,  50), new Point2D(4700, 100));
+	waterList[cnt++] = new CurveSegment(new Point2D(4700, 100), new Point2D(4800,  50), new Point2D(4900, 100));
+	waterList[cnt++] = new CurveSegment(new Point2D(4900, 100), new Point2D(5000,  50), new Point2D(5100, 100));
+
+	cnt = 0;
+	entityList[cnt++] = new GameEntity(IMG_PLAYER, 128,  200,   0, DIR_RIGHT, BRAIN_PLAYER, 100,  20);
+	entityList[cnt++] = new GameEntity(IMG_ENEMY,   64,  500,   0, DIR_LEFT,  BRAIN_ENEMY,   20,  35);
+	entityList[cnt++] = new GameEntity(IMG_ENEMY,   64, 1000,   0, DIR_LEFT,  BRAIN_ENEMY,   20,  35);
+	entityList[cnt++] = new GameEntity(IMG_ENEMY,   64, 1500,   0, DIR_LEFT,  BRAIN_ENEMY,   20,  35);
+	entityList[cnt++] = new GameEntity(IMG_ENEMY,   64, 1750,   0, DIR_LEFT,  BRAIN_ENEMY,   20,  35);
+	entityList[cnt++] = new GameEntity(IMG_ENEMY,   64, 2450,   0, DIR_LEFT,  BRAIN_ENEMY,   20,  35);
+	entityList[cnt++] = new GameEntity(IMG_ENEMY,   64, 2550,   0, DIR_LEFT,  BRAIN_ENEMY,   20,  35);
+	entityList[cnt++] = new GameEntity(IMG_ENEMY,   64, 3150,   0, DIR_LEFT,  BRAIN_ENEMY,   20,  35);
+	entityList[cnt++] = new GameEntity(IMG_ENEMY,   64, 3250,   0, DIR_LEFT,  BRAIN_ENEMY,   20,  35);
+	entityList[cnt++] = new GameEntity(IMG_ENEMY,   64, 3500,   0, DIR_LEFT,  BRAIN_ENEMY,   20,  35);
+	entityList[cnt++] = new GameEntity(IMG_ENEMY,   64, 3550,   0, DIR_RIGHT, BRAIN_ENEMY,   20,  35);
+	entityList[cnt++] = new GameEntity(IMG_ENEMY,   64, 3600,   0, DIR_LEFT,  BRAIN_ENEMY,   20,  35);
+	entityList[cnt++] = new GameEntity(IMG_ARK,    256, 3900, 150, DIR_RIGHT, BRAIN_ARK,    200, 100);
+	
+	gInitTime = Date.now();
+
+	AsyncLoadImages();
+	AsyncLoadAudio();
+	
+	window.requestAnimFrame =
+	(function()
+	{
+		return window.requestAnimationFrame ||
+			   window.webkitRequestAnimationFrame ||
+			   window.mozRequestAnimationFrame ||
+			   window.oRequestAnimationFrame ||
+			   window.msRequestAnimationFrame ||
+			   function(callback)
+			   { window.setTimeout(callback, 1000.0/60.0); };
+	})();
+	window.requestAnimFrame(GameLoop);
+}
+
+init();
+</script>
+</section>
+</body>
+</html>
