@@ -53,6 +53,10 @@ Your browser does not support HTML5 Audio, which is required to play this game. 
 </audio>
 
 <script type="text/javascript">
+(function()
+{
+"use strict";
+
 var gCanvas;
 var gCtx;
 
@@ -133,8 +137,10 @@ function Point2D(x, y)
 
 Point2D.prototype.magnitude = function()
 {
-	if ((this.x == 0) && (this.y == 0))
+	if ((this.x === 0) && (this.y === 0))
+    {
 		return 0.0;
+    }
 	return Math.sqrt(this.x*this.x + this.y*this.y);
 };
 Point2D.prototype.add = function(other)
@@ -167,6 +173,131 @@ function CurveSegment(start, control, end)
 }
 
 /**
+ * @param seg
+ * @param x
+ * @return {Number}
+ */
+function GetTAlongQuadraticCurve(seg, x)
+{
+    var a = seg.start.x;
+    var b = seg.control.x;
+    var c = seg.end.x;
+
+    var t;
+    if (Math.abs((2*b - c) - a) < 0.001)
+    {
+        t = (2*b - c - x) / (2*(b - c));
+    }
+    else
+    {
+        var sqrt_res = Math.sqrt(-a*c + a*x + b*b - 2*b*x + c*x);
+        //var t0 = ( sqrt_res - a + b) / (-a + 2 * b - c);
+        t = (-sqrt_res - a + b) / (-a + 2 * b - c);
+    }
+
+    return t;
+}
+
+/**
+ * @param seg
+ * @param t
+ * @return {Point2D}
+ */
+function GetQuadraticCurvePoint(seg, t)
+{
+    var invT = 1.0 - t;
+
+    var p0 = seg.start;
+    var p1 = seg.control;
+    var p2 = seg.end;
+
+    return new Point2D((invT * invT * p0.x) + (2.0 * invT * t * p1.x) + (t * t * p2.x),
+            (invT * invT * p0.y) + (2.0 * invT * t * p1.y) + (t * t * p2.y));
+}
+
+/**
+ * @param seg
+ * @param t
+ * @return {Point2D}
+ */
+function GetQuadraticCurveTangent(seg, t)
+{
+    var invT = 1.0 - t;
+
+    var p0 = seg.start;
+    var p1 = seg.control;
+    var p2 = seg.end;
+
+    var p1Mp0 = new Point2D(p1.x, p1.y);
+    p1Mp0.subtract(p0);
+    var p2Mp1 = new Point2D(p2.x, p2.y);
+    p2Mp1.subtract(p1);
+
+    return new Point2D((2.0 * invT * p1Mp0.x) + (2.0 * t * p2Mp1.x),
+            (2.0 * invT * p1Mp0.y) + (2.0 * t * p2Mp1.y));
+}
+
+/**
+ * @param curveList
+ * @param x
+ * @return {Number}
+ */
+function CurveHeightAt(curveList, x)
+{
+    for (var i=0; i<curveList.length; i++)
+    {
+        var seg = curveList[i];
+        if ((x >= seg.start.x) && (x <= seg.end.x))
+        {
+            var t = GetTAlongQuadraticCurve(seg, x);
+            var pos = GetQuadraticCurvePoint(seg, t);
+
+            return pos.y;
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * @param x
+ * @return {Number}
+ */
+function WaterHeightAt(x)
+{
+    return CurveHeightAt(gWaterList, x);
+}
+
+/**
+ * @param x
+ * @return {Number}
+ */
+function GroundHeightAt(x)
+{
+    return CurveHeightAt(gGroundList, x);
+}
+
+/**
+ * @param curveList
+ * @param x
+ * @return {Point2D}
+ */
+function CurveTangentAt(curveList, x)
+{
+    for (var i=0; i<curveList.length; i++)
+    {
+        var seg = curveList[i];
+        if ((x >= seg.start.x) && (x <= seg.end.x))
+        {
+            var t = GetTAlongQuadraticCurve(seg, x);
+            return GetQuadraticCurveTangent(seg, t);
+        }
+    }
+
+    return new Point2D(1, 0);
+}
+
+/**
  * @param img
  * @param size
  * @param x
@@ -190,12 +321,12 @@ function GameEntity(img, size, x, y, direction, brain, life, attack)
 	this.attack = attack;
 	this.invulnerableTimeRemaining = 0;
 	
-	this.isPlayer = (brain == BRAIN_PLAYER);
-	if (brain == BRAIN_PLAYER)
+	this.isPlayer = (brain === BRAIN_PLAYER);
+	if (brain === BRAIN_PLAYER)
 		this.runAI = this.PlayerBrain;
-	else if (brain == BRAIN_ENEMY)
+	else if (brain === BRAIN_ENEMY)
 		this.runAI = this.EnemyBrain;
-	else if (brain == BRAIN_ARK)
+	else if (brain === BRAIN_ARK)
 		this.runAI = this.ArkBrain;
 }
 
@@ -205,7 +336,9 @@ GameEntity.prototype.GenericBrain = function()
 	{
         this.invulnerableTimeRemaining -= gTimeDelta;
 		if (this.invulnerableTimeRemaining < 0)
+        {
             this.invulnerableTimeRemaining = 0;
+        }
 	}
 
 	var ext = new Point2D(this.position.x + ((this.size / 2.0) * this.direction), this.position.y);
@@ -217,7 +350,9 @@ GameEntity.prototype.GenericBrain = function()
             this.velocity.x = 0.0;
 			
 			if (!this.isPlayer)
+            {
                 this.direction *= -1.0;
+            }
 		}
 	}
 
@@ -293,9 +428,13 @@ GameEntity.prototype.PlayerBrain = function()
 			gAudioList[jumpSound][1].play();
 			
 			if (this.velocity.y >= 0)
+            {
 				this.velocity.y += gDeltaY;
+            }
 			else
+            {
 				this.velocity.y = gDeltaY;
+            }
 		}
 	}
 	
@@ -360,7 +499,9 @@ GameEntity.prototype.EnemyBrain = function()
 	if (this.life > 0)
 	{
 		if (Math.floor(Math.random() * 1000.0) < 4)
+        {
 			this.direction *= -1;
+        }
 		this.velocity.x += this.direction * (gDeltaX / 8.0);
 	}
 	
@@ -402,131 +543,6 @@ function GetVisibleExtents()
     extents[1] = Math.ceil(gCameraPosition.x + halfCanvasW);
 
     return extents;
-}
-
-/**
- * @param seg
- * @param x
- * @return {Number}
- */
-function GetTAlongQuadraticCurve(seg, x)
-{
-    var a = seg.start.x;
-    var b = seg.control.x;
-    var c = seg.end.x;
-
-    var t;
-    if (Math.abs((2*b - c) - a) < 0.001)
-    {
-        t = (2*b - c - x) / (2*(b - c));
-    }
-    else
-    {
-        var sqrt_res = Math.sqrt(-a*c + a*x + b*b - 2*b*x + c*x);
-        //var t0 = ( sqrt_res - a + b) / (-a + 2 * b - c);
-        t = (-sqrt_res - a + b) / (-a + 2 * b - c);
-    }
-
-    return t;
-}
-
-/**
- * @param seg
- * @param t
- * @return {Point2D}
- */
-function GetQuadraticCurvePoint(seg, t)
-{
-    var invT = 1.0 - t;
-	
-	var p0 = seg.start;
-	var p1 = seg.control;
-	var p2 = seg.end;
-	
-    return new Point2D((invT * invT * p0.x) + (2.0 * invT * t * p1.x) + (t * t * p2.x),
-					   (invT * invT * p0.y) + (2.0 * invT * t * p1.y) + (t * t * p2.y));
-}
-
-/**
- * @param seg
- * @param t
- * @return {Point2D}
- */
-function GetQuadraticCurveTangent(seg, t)
-{
-    var invT = 1.0 - t;
-
-    var p0 = seg.start;
-    var p1 = seg.control;
-    var p2 = seg.end;
-
-    var p1Mp0 = new Point2D(p1.x, p1.y);
-    p1Mp0.subtract(p0);
-    var p2Mp1 = new Point2D(p2.x, p2.y);
-    p2Mp1.subtract(p1);
-
-    return new Point2D((2.0 * invT * p1Mp0.x) + (2.0 * t * p2Mp1.x),
-                       (2.0 * invT * p1Mp0.y) + (2.0 * t * p2Mp1.y));
-}
-
-/**
- * @param x
- * @return {Number}
- */
-function WaterHeightAt(x)
-{
-	return CurveHeightAt(gWaterList, x);
-}
-
-/**
- * @param x
- * @return {Number}
- */
-function GroundHeightAt(x)
-{
-	return CurveHeightAt(gGroundList, x);
-}
-
-/**
- * @param curveList
- * @param x
- * @return {Number}
- */
-function CurveHeightAt(curveList, x)
-{
-	for (var i=0; i<curveList.length; i++)
-	{
-		var seg = curveList[i];
-		if ((x >= seg.start.x) && (x <= seg.end.x))
-		{
-            var t = GetTAlongQuadraticCurve(seg, x);
-            var pos = GetQuadraticCurvePoint(seg, t);
-
-            return pos.y;
-		}
-	}
-	
-	return 0;
-}
-
-/**
- * @param curveList
- * @param x
- * @return {Point2D}
- */
-function CurveTangentAt(curveList, x)
-{
-    for (var i=0; i<curveList.length; i++)
-    {
-        var seg = curveList[i];
-        if ((x >= seg.start.x) && (x <= seg.end.x))
-        {
-            var t = GetTAlongQuadraticCurve(seg, x);
-            return GetQuadraticCurveTangent(seg, t);
-        }
-    }
-
-    return new Point2D(1, 0);
 }
 
 /**
@@ -579,22 +595,6 @@ function DrawEntity(entity)
 
 /**
  */
-function DrawWater()
-{
-    var fillOffset = new Point2D(-((gCurrTime - gStartTime) / 5.0), 128.0);
-
-    DrawCurveList(gWaterList, IMG_BG_WATER, fillOffset, "#1F9BFB");
-}
-
-/**
- */
-function DrawGround()
-{
-    DrawCurveList(gGroundList, IMG_BG_GREEN, new Point2D(0, 0), "#65962C");
-}
-
-/**
- */
 function DrawCurveList(curveList, fillImage, fillOffset, stroke)
 {
     if (curveList.length > 0)
@@ -609,10 +609,14 @@ function DrawCurveList(curveList, fillImage, fillOffset, stroke)
         var i;
 
         for (i=0; (i<curveList.length) && (curveList[i].end.x < visibleExtents[0]); /**/)
+        {
             i++;
+        }
         var firstIdx = i;
         for (/**/; (i<curveList.length) && (curveList[i].start.x < visibleExtents[1]); /**/)
+        {
             i++;
+        }
         var lastIdx = i - 1;
 
         if ((firstIdx < curveList.length) && (firstIdx <= lastIdx))
@@ -647,6 +651,24 @@ function DrawCurveList(curveList, fillImage, fillOffset, stroke)
     }
 }
 
+/**
+ */
+function DrawWater()
+{
+    var fillOffset = new Point2D(-((gCurrTime - gStartTime) / 5.0), 128.0);
+
+    DrawCurveList(gWaterList, IMG_BG_WATER, fillOffset, "#1F9BFB");
+}
+
+/**
+ */
+function DrawGround()
+{
+    DrawCurveList(gGroundList, IMG_BG_GREEN, new Point2D(0, 0), "#65962C");
+}
+
+/**
+ */
 function DrawLevel()
 {
 	gCtx.save();
@@ -659,10 +681,14 @@ function DrawLevel()
 	gCtx.restore();
 }
 
+/**
+ */
 function DrawEntities()
 {
 	for (var i=0; i<gEntityList.length; i++)
+    {
 		DrawEntity(gEntityList[i]);
+    }
 }
 
 function Clear()
@@ -691,7 +717,9 @@ function ImagesLoaded()
 	for (var i=0; i<gImageList.length; i++)
 	{
 		if (!gImageList[i][0])
+        {
 			return false;
+        }
 	}
 	
 	return true;
@@ -705,12 +733,16 @@ function AudioLoaded()
 	// Only wait for 30s for audio to load, as many browsers currently have issues with preloading audio
 	var currTime = Date.now();
 	if ((currTime - gInitTime) > 30000)
+    {
 		return true;
+    }
 
 	for (var i=0; i<gAudioList.length; i++)
 	{
 		if (!gAudioList[i][0])
+        {
 			return false;
+        }
 	}
 	
 	return true;
@@ -833,7 +865,10 @@ function Draw()
 function UpdateKeys()
 {
 	if (!gKeys[KEY_PAUSE] && gPrevKeys[KEY_PAUSE])
+    {
 		gIsPaused = !gIsPaused;
+    }
+
 	if (!gKeys[KEY_MUTE] && gPrevKeys[KEY_MUTE])
 	{
 		gIsMuted = !gIsMuted;
@@ -933,24 +968,32 @@ function GameLoop()
 	Draw();
 }
 
-function onResizeWindow()
+window.onResizeWindow = function()
 {
 	var desiredAspectRatio = 16.0/9.0;
 	var desiredW = window.innerWidth - 32;
 	var desiredH = window.innerHeight - 32;
 	
 	if ((desiredW / desiredAspectRatio) <= desiredH)
+    {
 		desiredH = desiredW / desiredAspectRatio;
+    }
 	else
+    {
 		desiredW = desiredH * desiredAspectRatio;
+    }
 	
 	if (gCanvas.width != desiredW)
+    {
 		gCanvas.width = desiredW;
+    }
 	if (gCanvas.height != desiredH)
+    {
 		gCanvas.height = desiredH;
+    }
 
     gCameraPosition.y = gCanvas.height / 2;
-}
+};
 
 function onImageLoaded(i)
 {
@@ -960,7 +1003,9 @@ function onImageLoaded(i)
 function LoadImage(i, src)
 {
 	if (!gImageList[i][0])
+    {
 		gImageList[i][1].src = src;
+    }
 }
 
 function onAudioLoaded(i)
@@ -1047,7 +1092,9 @@ function init()
 	window.addEventListener('keyup', onKeyUp, true);
 	
 	for (var i=0; i<gKeys.length; i++)
+    {
 		gKeys[i] = false;
+    }
 	gPrevKeys = gKeys.slice();
 
 	var cnt = 0;
@@ -1162,6 +1209,8 @@ function init()
 }
 
 init();
+
+})();   // "use strict"; wrapper
 </script>
 </section>
 </body>
